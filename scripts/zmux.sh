@@ -2,6 +2,8 @@
 #!/usr/bin/env bash
 set -e
 #config=$(parse_config "~/.config/zmux/config.yaml")
+command -v tmux >/dev/null 2>&1 || { echo >&2 "tmux is required but it's not installed. Aborting."; exit 1; }
+command -v yq >/dev/null 2>&1 || { echo >&2 "yq is required but it's not installed. Aborting."; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/config_parser.sh"
@@ -25,27 +27,17 @@ main() {
         if session_config_exists "$config" "$session_name"; then
             create_session "$config" "$session_name"
         else
-            local fuzzy_match=$(fuzzy_find_session "$config" "$session_name")
-            if [[ -n "$fuzzy_match" ]]; then
-                echo "Session '$session_name' not found. Did you mean '$fuzzy_match'?"
-                read -p "Create session '$fuzzy_match'? (y/n) " -n 1 -r
-                echo
-                if [[ $REPLY =~ ^[Yy]$ ]]; then
-                    create_session "$config" "$fuzzy_match"
-                    session_name="$fuzzy_match"
-                else
-                    exit 1
-                fi
-            else
-                echo "Session '$session_name' not found and no similar sessions exist."
-                exit 1
-            fi
+            echo "Session '$session_name' not found in configuration."
+            exit 1
         fi
     fi
 
+    # Attach to the session
     if [[ -z "$TMUX" ]]; then
+        # Outside tmux, attach directly
         tmux attach-session -t "$session_name"
     else
+        # Inside tmux, switch client
         tmux switch-client -t "$session_name"
     fi
 }

@@ -1,35 +1,22 @@
 sessions:
-  exmaple:
-    root: ~/projects/advanced
-    env:
-      PROJECT_ENV: production
+  example:
+    root: ~/CommonCore/4.CPP/
+    start_index: 1
     windows:
       - name: Editor
-        layout: main-vertical
-        panes:
-          - command: nvim main.py
-          - command: nvim test_main.py
-      - name: Servers
-        layout: tiled
-        panes:
-          - command: python app.py
-          - command: python worker.py
-          - command: redis-server
-          - command: mongod
+        command: nvim ~/CommonCore/4.CPP/CPP00/
+      - name: Compilation
+        command: ls
       - name: Logs
-        command: tail -f logs/app.log
+        command: tail -f /var/log/syslog
+
   mini:
     root: ~/CommonCore/3.MiniShell/
-    env:
-      PROJECT_ENV: production
+    start_index: 1
     windows:
       - name: Editor
-        layout: main-vertical
-        panes:
-          - command: nvim ~/CommonCore/3.MiniShell/src/
+        command: nvim ~/CommonCore/3.MiniShell/src/
       - name: Compiling
-        layout: tiled
-        panes:
-          - command: pwd
+        command: make
       - name: README
         command: nvim ~/CommonCore/3.MiniShell/README.md

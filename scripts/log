@@ -1,0 +1,335 @@
+#!/usr/bin/env bash
+
+# Function to parse YAML config file with flattening
+parse_config() {
+echo "$flat_config"
+  local config_file="$1"
+  if [[ ! -f "$config_file" ]]; then
+    echo "Config file not found: $config_file" >&2
+    return 1
+  fi
+
+  # Parse YAML into a single line with flattened key-value pairs using yq
+  flat_config=$(yq eval -o=props "$config_file")
+
+  echo "$flat_config"
+}
+
+# Function to get all session names from the config
+get_session_names() {
+  local config="$1"
+  echo "$config" | grep '^sessions\.' | cut -d'.' -f2 | sort | uniq
+}
+
+# Function to check if a session exists in the config
+session_config_exists() {
+  local config="$1"
+  local session_name="$2"
+  echo "$config" | grep -q "^sessions\.${session_name}\."
+}
+
+# Function to get a specific session's configuration
+get_session_config() {
+  local config="$1"
+  local session_name="$2"
+  echo "$config" | grep "^sessions\.${session_name}\." | sed "s/^sessions\.${session_name}\.//"
+}
+
+# Function to get the root directory for a session
+get_session_root() {
+  local config="$1"
+  local session_name="$2"
+  echo "$config" | grep "^sessions\.${session_name}\.root=" | cut -d'=' -f2 | tr -d '"'
+}
+
+# Function to get all window configurations for a session
+get_session_windows() {
+  local config="$1"
+  local session_name="$2"
+  echo "$config" | grep "^sessions\.${session_name}\.windows\." | sed "s/^sessions\.${session_name}\.windows\.//"
+}
+
+# Function to get a specific window's name
+get_window_name() {
+  local window_config="$1"
+  echo "$window_config" | grep "\.name=" | cut -d'=' -f2 | tr -d '"'
+}
+
+# Function to get a specific window's command
+get_window_command() {
+  local window_config="$1"
+  echo "$window_config" | grep "\.command=" | cut -d'=' -f2 | tr -d '"'
+}
+
+# Example usage:
+# config=$(parse_config "/path/to/config.yaml")
+# session_names=$(get_session_names "$config")
+# session_config=$(get_session_config "$config" "example")
+# root_dir=$(get_session_root "$config" "example")
+# windows=$(get_session_windows "$config" "example")
+sessions:
+  example:
+    root: ~/CommonCore/4.CPP/
+    start_index: 1
+    windows:
+      - name: Editor
+        layout: main-vertical
+        panes:
+          - command: nvim ~/CommonCore/4.CPP/CPP00/
+      - name: Compilation
+        layout: tiled
+        panes:
+          - command: ls
+          - command: pwd
+      - name: Logs
+        command: lg
+  mini:
+    root: ~/CommonCore/3.MiniShell/
+    start_index: 1
+    windows:
+      - name: Editor
+        layout: main-vertical
+        panes:
+          - command: nvim ~/CommonCore/3.MiniShell/src/
+      - name: Compiling
+        layout: tiled
+        panes:
+          - command: pwd
+      - name: README
+        command: nvim ~/CommonCore/3.MiniShell/README.md
+# file session_manager.sh
+#!/usr/bin/env bash
+
+# Check if a tmux session exists
+session_exists() {
+    if tmux has-session -t "$1" 2>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+get_session_start_index() {
+    local config="$1"
+    local session_name="$2"
+    local start_index=$(echo "$config" | grep "^sessions\.${session_name}\.start_index=" | cut -d'=' -f2)
+    
+    if [[ -z "$start_index" ]]; then
+        start_index=1  # Default to 0 if not specified
+    fi
+    echo "$start_index"
+}
+# Create a new tmux session based on the configuration
+create_session() {
+echo "$windows"
+    local config="$1"
+    local session_name="$2"
+
+    local root_dir=$(get_session_root "$config" "$session_name")
+    local windows=$(get_session_windows "$config" "$session_name")
+    local start_index=$(get_session_start_index "$config" "$session_name")
+
+    # Start a new session
+    tmux new-session -d -s "$session_name" -c "$root_dir"
+
+    local window_index=$start_index
+    echo "$windows" | while read -r window_config; do
+    echo "$panes"
+        local window_name=$(echo "$window_config" | grep '\.name=' | cut -d'=' -f2 | tr -d '"')
+        local layout=$(echo "$window_config" | grep '\.layout=' | cut -d'=' -f2 | tr -d '"')
+        local panes=$(echo "$window_config" | grep '\.panes\.' | sed 's/^.*\.panes\.//')
+
+        if [[ $window_index -eq $start_index ]]; then
+            # Rename the first window
+            tmux rename-window -t "${session_name}:$window_index" "$window_name"
+        else
+            # Create a new window
+            tmux new-window -t "${session_name}:$window_index" -n "$window_name" -c "$root_dir"
+        fi
+
+        # Create panes and run commands
+        local pane_index=0
+        echo "$panes" | while read -r pane_config; do
+            local pane_command=$(echo "$pane_config" | grep '\.command=' | cut -d'=' -f2 | tr -d '"')
+            if [[ $pane_index -gt 0 ]]; then
+                tmux split-window -t "${session_name}:$window_index" -c "$root_dir"
+            fi
+            if [[ -n "$pane_command" ]]; then
+                tmux send-keys -t "${session_name}:$window_index.$pane_index" "$pane_command" C-m
+            fi
+            ((pane_index++))
+        done
+
+        # Apply the layout if specified
+        if [[ -n "$layout" ]]; then
+            tmux select-layout -t "${session_name}:$window_index" "$layout"
+        fi
+
+        ((window_index++))
+    done
+
+    echo "Session '$session_name' created."
+}
+
+# Switch to an existing session or create a new one
+switch_or_create_session() {
+    local config="$1"
+    local session_name="$2"
+
+    if session_exists "$session_name"; then
+        echo "Switching to existing session '$session_name'."
+        if [[ -z "$TMUX" ]]; then
+            tmux attach-session -t "$session_name"
+        else
+            tmux switch-client -t "$session_name"
+        fi
+    else
+        echo "Creating new session '$session_name'."
+        create_session "$config" "$session_name"
+        if [[ -z "$TMUX" ]]; then
+            tmux attach-session -t "$session_name"
+        else
+            tmux switch-client -t "$session_name"
+        fi
+    fi
+}
+
+# List all existing tmux sessions
+list_sessions() {
+    tmux list-sessions -F "#S" 2>/dev/null
+}
+
+# Kill a specific tmux session
+kill_session() {
+    local session_name="$1"
+    if session_exists "$session_name"; then
+        tmux kill-session -t "$session_name"
+        echo "Session '$session_name' killed."
+    else
+        echo "Session '$session_name' does not exist."
+    fi
+}
+
+# Rename an existing tmux session
+rename_session() {
+    local old_name="$1"
+    local new_name="$2"
+    if session_exists "$old_name"; then
+        tmux rename-session -t "$old_name" "$new_name"
+        echo "Session renamed from '$old_name' to '$new_name'."
+    else
+        echo "Session '$old_name' does not exist."
+    fi
+}
+#!/bin/bash
+
+# Function to flatten YAML data
+parse_config() {
+  local data="$1"
+  local flattened_data
+
+  for key in "${!data[@]}"; do
+    if [[ "${data[$key]}" =~ ^\{.*\}$ ]]; then
+      for subkey in "${!data[$key][@]}"; do
+        flattened_data["${key}.${subkey}"]=$(flatten_yaml "${data[$key][$subkey]}")
+      done
+    else
+      flattened_data["$key"]="${data[$key]}"
+    fi
+  done
+
+  echo "${flattened_data[@]}"
+}
+
+# Load YAML data
+yaml_data=$(yq -o=props ./config.yaml)
+
+# Flatten the YAML data
+flattened_yaml=$(parse_config "$yaml_data")
+
+# Print the flattened YAML data
+for key in "${!flattened_yaml[@]}"; do
+  echo "$key: ${flattened_yaml[$key]}"
+done
+# file zmux.sh
+#!/usr/bin/env bash
+set -e
+#config=$(parse_config "~/.config/zmux/config.yaml")
+command -v tmux >/dev/null 2>&1 || { echo >&2 "tmux is required but it's not installed. Aborting."; exit 1; }
+command -v yq >/dev/null 2>&1 || { echo >&2 "yq is required but it's not installed. Aborting."; exit 1; }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/config_parser.sh"
+source "${SCRIPT_DIR}/session_manager.sh"
+source "${SCRIPT_DIR}/utils.sh"
+
+#CONFIG_FILE="${HOME}/.config/zmux/config.yaml"
+CONFIG_FILE="./config.yaml"
+
+main() {
+    if [[ $# -eq 0 ]]; then
+        echo "Usage: zmux <session_name>"
+        list_sessions
+        exit 1
+    fi
+
+    local session_name="$1"
+    local config=$(parse_config "$CONFIG_FILE")
+    
+    if ! session_exists "$session_name"; then
+        if session_config_exists "$config" "$session_name"; then
+            create_session "$config" "$session_name"
+        else
+            local fuzzy_match=$(fuzzy_find_session "$config" "$session_name")
+            if [[ -n "$fuzzy_match" ]]; then
+                echo "Session '$session_name' not found. Did you mean '$fuzzy_match'?"
+                read -p "Create session '$fuzzy_match'? (y/n) " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    create_session "$config" "$fuzzy_match"
+                    session_name="$fuzzy_match"
+                else
+                    exit 1
+                fi
+            else
+                echo "Session '$session_name' not found and no similar sessions exist."
+                exit 1
+            fi
+        fi
+    fi
+
+    if [[ -z "$TMUX" ]]; then
+        tmux attach-session -t "$session_name"
+    else
+        tmux switch-client -t "$session_name"
+    fi
+}
+
+list_sessions() {
+    echo "Available sessions (open and configured):"
+
+    # Parse the config to get session names
+    local config=$(parse_config "$CONFIG_FILE")
+    local configured_sessions=$(get_session_names "$config")
+
+    # Get the list of currently running tmux sessions
+    local open_sessions=$(tmux list-sessions -F "#S" 2>/dev/null)
+
+    # Loop through each configured session
+    echo "$configured_sessions" | while read -r session; do
+        if echo "$open_sessions" | grep -q "^$session$"; then
+            echo "  - $session (OPEN)"
+        else
+            echo "  - $session (NOT OPEN)"
+        fi
+    done
+
+    # Also print sessions that are open in tmux but not listed in the config
+    echo "$open_sessions" | while read -r open_session; do
+        if ! echo "$configured_sessions" | grep -q "^$open_session$"; then
+            echo "  - $open_session (OPEN, NOT CONFIGURED)"
+        fi
+    done
+}
+
+main "$@"

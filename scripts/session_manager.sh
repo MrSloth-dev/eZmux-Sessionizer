@@ -3,35 +3,59 @@
 
 # Check if a tmux session exists
 session_exists() {
-    tmux has-session -t "$1" 2>/dev/null
+    if tmux has-session -t "$1" 2>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
 }
 
+get_session_start_index() {
+    local config="$1"
+    local session_name="$2"
+    local start_index=$(echo "$config" | grep "^sessions\.${session_name}\.start_index=" | cut -d'=' -f2)
+    
+    if [[ -z "$start_index" ]]; then
+        start_index=1  # Default to 0 if not specified
+    fi
+    echo "$start_index"
+}
 # Create a new tmux session based on the configuration
 create_session() {
     local config="$1"
     local session_name="$2"
-    
+
     local root_dir=$(get_session_root "$config" "$session_name")
     local windows=$(get_session_windows "$config" "$session_name")
+    local start_index=$(get_session_start_index "$config" "$session_name")
+
+    echo "Debug: root_dir = $root_dir"
+    echo "Debug: start_index = $start_index"
+    echo "Debug: Windows configuration:"
+    echo "$windows"
 
     # Start a new session
     tmux new-session -d -s "$session_name" -c "$root_dir"
 
-    local window_index=0
+    local window_index=$start_index
     echo "$windows" | while read -r window_config; do
-        local window_name=$(get_window_name "$window_config")
-        local window_command=$(get_window_command "$window_config")
+        echo "Debug: Processing window config: $window_config"
+        local window_name=$(echo "$window_config" | grep '\.name=' | cut -d'=' -f2 | tr -d '"')
+        local window_command=$(echo "$window_config" | grep '\.command=' | cut -d'=' -f2 | tr -d '"')
 
-        if [[ $window_index -eq 0 ]]; then
-            # Rename the first window
-            tmux rename-window -t "${session_name}:0" "$window_name"
+        echo "Debug: window_name = $window_name"
+        echo "Debug: window_command = $window_command"
+
+        if [[ $window_index -eq $start_index ]]; then
+            echo "Debug: Renaming first window to $window_name"
+            tmux rename-window -t "${session_name}:$window_index" "$window_name"
         else
-            # Create a new window
+            echo "Debug: Creating new window $window_name"
             tmux new-window -t "${session_name}:$window_index" -n "$window_name" -c "$root_dir"
         fi
 
-        # If a command is specified, run it in the window
         if [[ -n "$window_command" ]]; then
+            echo "Debug: Sending command to window: $window_command"
             tmux send-keys -t "${session_name}:$window_index" "$window_command" C-m
         fi
 

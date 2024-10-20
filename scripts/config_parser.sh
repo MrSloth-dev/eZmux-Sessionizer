@@ -2,6 +2,7 @@
 
 # Function to parse YAML config file with flattening
 parse_config() {
+echo "$flat_config"
   local config_file="$1"
   if [[ ! -f "$config_file" ]]; then
     echo "Config file not found: $config_file" >&2
@@ -45,6 +46,10 @@ get_session_root() {
 get_session_windows() {
   local config="$1"
   local session_name="$2"
+  echo "Debug: Fetching windows for session $session_name"
+  echo "Debug: Full config:"
+  echo "$config"
+  echo "Debug: Filtered windows config:"
   echo "$config" | grep "^sessions\.${session_name}\.windows\." | sed "s/^sessions\.${session_name}\.windows\.//"
 }
 
